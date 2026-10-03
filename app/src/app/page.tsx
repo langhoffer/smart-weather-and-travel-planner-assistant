@@ -28,7 +28,7 @@ export default function ChatPage() {
           return (
             <div key={message.id} className="space-y-2">
               {message.parts?.map((part, idx) => {
-                // Textová část zprávy
+                // Text message part
                 if (part.type === "text") {
                   return (
                     <div
@@ -52,7 +52,7 @@ export default function ChatPage() {
                   );
                 }
 
-                // Generative UI / Nástroje (Tool Call & Result)
+                // Generative UI / Tool Parts (Tool Call & Result)
                 if (part.type.startsWith("tool-")) {
                   const toolPart = part as {
                     toolCallId: string;
@@ -65,13 +65,16 @@ export default function ChatPage() {
                     toolPart.toolName || part.type.replace("tool-", "");
                   const state = toolPart.state;
 
-                  if (state !== "result") {
+                  // Only show loader if the stream is active AND tool result hasn't arrived
+                  const isToolPending = isPending && state !== "result";
+
+                  if (isToolPending) {
                     return (
                       <div
                         key={toolPart.toolCallId || idx}
                         className="p-3 border rounded-lg bg-yellow-50 text-yellow-800 text-sm animate-pulse"
                       >
-                        Načítám data z nástroje: <strong>{toolName}</strong>...
+                        Fetching data from tool: <strong>{toolName}</strong>...
                       </div>
                     );
                   }
@@ -91,18 +94,20 @@ export default function ChatPage() {
                         className="p-4 border border-blue-200 rounded-lg bg-blue-50 text-blue-900 my-2"
                       >
                         <h2 className="font-semibold text-lg border-b border-blue-200 pb-1 mb-2">
-                          Počasí pro {city}
+                          Weather for {city}
                         </h2>
                         <p>
-                          <strong>Teplota:</strong> {temperature}
+                          <strong>Temperature:</strong> {temperature}
                         </p>
                         <p>
-                          <strong>Stav:</strong> {condition}
+                          <strong>Condition:</strong> {condition}
                         </p>
-                        <p className="mt-1 text-sm text-blue-800">
-                          <strong>Doporučená výbava:</strong>{" "}
-                          {recommendedGear?.join(", ")}
-                        </p>
+                        {recommendedGear && recommendedGear.length > 0 && (
+                          <p className="mt-1 text-sm text-blue-800">
+                            <strong>Recommended Gear:</strong>{" "}
+                            {recommendedGear.join(", ")}
+                          </p>
+                        )}
                       </div>
                     );
                   }
@@ -120,27 +125,33 @@ export default function ChatPage() {
                         className="my-2 space-y-2"
                       >
                         <h2 className="font-semibold text-md text-gray-700">
-                          Nalezené aktivity:
+                          Found Activities:
                         </h2>
                         <div className="grid grid-cols-1 gap-2">
-                          {activities.map((act, i) => (
-                            <div
-                              key={i}
-                              className="p-3 border rounded-lg bg-gray-50 flex justify-between items-center"
-                            >
-                              <div>
-                                <h3 className="font-medium text-gray-900">
-                                  {act.title}
-                                </h3>
-                                <span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700">
-                                  {act.category}
+                          {activities.length > 0 ? (
+                            activities.map((act, i) => (
+                              <div
+                                key={i}
+                                className="p-3 border rounded-lg bg-gray-50 flex justify-between items-center"
+                              >
+                                <div>
+                                  <h3 className="font-medium text-gray-900">
+                                    {act.title}
+                                  </h3>
+                                  <span className="text-xs bg-gray-200 px-2 py-0.5 rounded text-gray-700">
+                                    {act.category}
+                                  </span>
+                                </div>
+                                <span className="font-bold text-green-600 text-sm">
+                                  {act.price}
                                 </span>
                               </div>
-                              <span className="font-bold text-green-600 text-sm">
-                                {act.price}
-                              </span>
+                            ))
+                          ) : (
+                            <div className="p-3 border rounded-lg bg-gray-50 text-sm text-gray-500 italic">
+                              No activities found for this query.
                             </div>
-                          ))}
+                          )}
                         </div>
                       </div>
                     );
@@ -154,8 +165,8 @@ export default function ChatPage() {
         })}
 
         {isPending && (
-          <div className="text-center text-sm text-gray-500 my-2">
-            Asistent přemýšlí...
+          <div className="text-center text-sm text-gray-500 my-2 animate-pulse">
+            Assistant is thinking...
           </div>
         )}
       </div>
@@ -164,7 +175,7 @@ export default function ChatPage() {
         <input
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          placeholder="Napište dotaz..."
+          placeholder="Ask something..."
           className="p-3 flex-grow rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500"
         />
         <button
@@ -172,7 +183,7 @@ export default function ChatPage() {
           disabled={isPending}
           className="px-5 py-3 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg disabled:opacity-50"
         >
-          Odeslat
+          Send
         </button>
       </form>
     </div>

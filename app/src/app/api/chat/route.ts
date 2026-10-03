@@ -30,7 +30,9 @@ export async function POST(req: Request) {
     const result = streamText({
       model: ollama.chat("llama3.1"),
       system:
-        "You are a Smart Travel Assistant. Use tools to fetch real data for weather and travel activities.",
+        "You are a Smart Travel Assistant. Use available tools to gather weather and activity information. " +
+        "CRITICAL INSTRUCTION: Never output raw JSON, function call signatures, or raw tool parameter blocks in your response text. " +
+        "Always synthesize tool outputs into friendly, clear, natural language responses.",
       messages: formattedMessages,
       stopWhen: stepCountIs(5),
       tools: {
@@ -38,35 +40,48 @@ export async function POST(req: Request) {
           description: "Get real-time weather information for a given city.",
           parameters: weatherSchema,
           execute: async ({ city }) => {
-            // 1. Geocode city name to lat/lon using Open-Meteo Geocoding API
-            const geoRes = await fetch(
-              `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`,
-            );
-            const geoData = await geoRes.json();
+            try {
+              const geoRes = await fetch(
+                `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`,
+              );
+              const geoData = await geoRes.json();
 
-            if (!geoData.results || geoData.results.length === 0) {
+              if (!geoData.results || geoData.results.length === 0) {
+                return {
+                  success: false,
+                  city,
+                  error: `Could not locate coordinates for city: ${city}`,
+                  data: null,
+                };
+              }
+
+              const { latitude, longitude, name, country } = geoData.results[0];
+
+              const weatherRes = await fetch(
+                `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`,
+              );
+              const weatherData = await weatherRes.json();
+
+              const tempC = weatherData.current_weather?.temperature;
+              const windSpeed = weatherData.current_weather?.windspeed;
+
               return {
-                error: `Could not locate coordinates for city: ${city}`,
+                success: true,
+                city: `${name}, ${country}`,
+                temperature: tempC !== undefined ? `${tempC}°C` : "N/A",
+                windSpeed:
+                  windSpeed !== undefined ? `${windSpeed} km/h` : "N/A",
+                conditionCode: weatherData.current_weather?.weathercode ?? 0,
+                error: null,
+              };
+            } catch (err) {
+              return {
+                success: false,
+                city,
+                error: (err as Error).message || "Failed to fetch weather data",
+                data: null,
               };
             }
-
-            const { latitude, longitude, name, country } = geoData.results[0];
-
-            // 2. Fetch live weather data
-            const weatherRes = await fetch(
-              `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`,
-            );
-            const weatherData = await weatherRes.json();
-
-            const tempC = weatherData.current_weather?.temperature;
-            const windSpeed = weatherData.current_weather?.windspeed;
-
-            return {
-              city: `${name}, ${country}`,
-              temperature: `${tempC}°C`,
-              windSpeed: `${windSpeed} km/h`,
-              conditionCode: weatherData.current_weather?.weathercode,
-            };
           },
         }),
 
@@ -74,25 +89,44 @@ export async function POST(req: Request) {
           description: "Search activities in a city by type.",
           parameters: activitiesSchema,
           execute: async ({ city, type }) => {
-            // Fetch dynamically from an API, database, or third-party service
-            const response = await fetch(
-              `https://api.example.com/activities?city=${encodeURIComponent(city)}&type=${encodeURIComponent(type)}`,
-              {
-                headers: {
-                  Authorization: `Bearer ${process.env.TRAVEL_API_KEY}`,
+            try {
+              const response = await fetch(
+                `https://api.example.com/activities?city=${encodeURIComponent(city)}&type=${encodeURIComponent(type)}`,
+                {
+                  headers: {
+                    Authorization: `Bearer ${process.env.TRAVEL_API_KEY ?? ""}`,
+                  },
                 },
-              },
-            ).catch(() => null);
+              ).catch(() => null);
 
-            if (response && response.ok) {
-              return await response.json();
+              if (response && response.ok) {
+                const data = await response.json();
+                return {
+                  success: true,
+                  city,
+                  type,
+                  activities: Array.isArray(data) ? data : [],
+                  message: null,
+                };
+              }
+
+              // Fallback response contract when endpoint is unresolvable or returns 404/500
+              return {
+                success: false,
+                city,
+                type,
+                activities: [],
+                message: `No active activity database found for ${type} activities in ${city}. Please offer general suggestions based on your knowledge.`,
+              };
+            } catch (err) {
+              return {
+                success: false,
+                city,
+                type,
+                activities: [],
+                message: `Error searching for ${type} activities in ${city}: ${(err as Error).message}`,
+              };
             }
-
-            // Fallback response structure if external endpoint fails
-            return {
-              query: { city, type },
-              message: `No active database connection found for ${type} activities in ${city}.`,
-            };
           },
         }),
       },
