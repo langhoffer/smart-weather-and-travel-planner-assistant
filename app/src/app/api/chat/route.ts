@@ -9,6 +9,8 @@ const ollama = createOpenAI({
 
 const weatherSchema = z.object({
   city: z.string().describe("The name of the city"),
+  latitude: z.number().optional().describe("Latitude if available"),
+  longitude: z.number().optional().describe("Longitude if available"),
 });
 
 const activitiesSchema = z.object({
@@ -27,48 +29,75 @@ export async function POST(req: Request) {
     const result = streamText({
       model: ollama("llama3.1"),
       system:
-        "You are a Smart Travel Assistant. To provide accurate recommendations, use the available tools.",
+        "You are a Smart Travel Assistant. Use tools to fetch real data for weather and travel activities.",
       messages: formattedMessages,
-      // Replaces maxSteps: 5 in AI SDK v5/v7
       stopWhen: stepCountIs(5),
       tools: {
         getWeather: tool({
-          description: "Get weather information for a city.",
+          description: "Get real-time weather information for a given city.",
           parameters: weatherSchema,
-          // @ts-ignore
           execute: async ({ city }) => {
+            // 1. Geocode city name to lat/lon using Open-Meteo Geocoding API
+            const geoRes = await fetch(
+              `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`,
+            );
+            const geoData = await geoRes.json();
+
+            if (!geoData.results || geoData.results.length === 0) {
+              return {
+                error: `Could not locate coordinates for city: ${city}`,
+              };
+            }
+
+            const { latitude, longitude, name, country } = geoData.results[0];
+
+            // 2. Fetch live weather data
+            const weatherRes = await fetch(
+              `https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current_weather=true`,
+            );
+            const weatherData = await weatherRes.json();
+
+            const tempC = weatherData.current_weather?.temperature;
+            const windSpeed = weatherData.current_weather?.windspeed;
+
             return {
-              city,
-              temperature: "22°C",
-              condition: "Sunny",
-              recommendedGear: ["Sunscreen", "Hat"],
+              city: `${name}, ${country}`,
+              temperature: `${tempC}°C`,
+              windSpeed: `${windSpeed} km/h`,
+              conditionCode: weatherData.current_weather?.weathercode,
             };
           },
         }),
+
         searchActivities: tool({
           description: "Search activities in a city by type.",
           parameters: activitiesSchema,
-          // @ts-ignore
           execute: async ({ city, type }) => {
-            return [
+            // Fetch dynamically from an API, database, or third-party service
+            const response = await fetch(
+              `https://api.example.com/activities?city=${encodeURIComponent(city)}&type=${encodeURIComponent(type)}`,
               {
-                title: `Hiking in ${city}`,
-                category: type,
-                price: "$10",
+                headers: {
+                  Authorization: `Bearer ${process.env.TRAVEL_API_KEY}`,
+                },
               },
-              {
-                title: `Museum Visit in ${city}`,
-                category: "Indoor",
-                price: "$20",
-              },
-            ];
+            ).catch(() => null);
+
+            if (response && response.ok) {
+              return await response.json();
+            }
+
+            // Fallback response structure if external endpoint fails
+            return {
+              query: { city, type },
+              message: `No active database connection found for ${type} activities in ${city}.`,
+            };
           },
         }),
       },
     });
 
     return result.toUIMessageStreamResponse({
-      // @ts-ignore
       onError: (error) => {
         console.error("Stream Error:", error);
         return {
