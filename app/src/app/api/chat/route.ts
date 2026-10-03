@@ -5,6 +5,7 @@ import { z } from "zod";
 const ollama = createOpenAI({
   baseURL: "http://localhost:11434/v1",
   apiKey: "ollama",
+  compatibility: "compatible",
 });
 
 const weatherSchema = z.object({
@@ -27,7 +28,7 @@ export async function POST(req: Request) {
       rawMessages.length > 0 ? await convertToModelMessages(rawMessages) : [];
 
     const result = streamText({
-      model: ollama("llama3.1"),
+      model: ollama.chat("llama3.1"),
       system:
         "You are a Smart Travel Assistant. Use tools to fetch real data for weather and travel activities.",
       messages: formattedMessages,
