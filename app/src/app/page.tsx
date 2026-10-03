@@ -3,14 +3,13 @@
 import { useChat } from "@ai-sdk/react";
 import { useState } from "react";
 
-// --- Types ---
+// --- Types & Helper Functions ---
+
 interface WeatherData {
   city?: string;
   temperature?: string;
   windSpeed?: string;
   conditionCode?: number;
-  condition?: string;
-  recommendedGear?: string[];
   error?: string;
 }
 
@@ -27,6 +26,33 @@ interface ActivityData {
   message?: string;
 }
 
+// Mapování Open-Meteo WMO kódů na lidsky čitelný popis
+function getWeatherCondition(code?: number): { label: string; icon: string } {
+  if (code === undefined || code === null)
+    return { label: "Clear", icon: "☀️" };
+  if (code === 0) return { label: "Clear Sky", icon: "☀️" };
+  if (code >= 1 && code <= 3) return { label: "Partly Cloudy", icon: "⛅" };
+  if (code >= 45 && code <= 48) return { label: "Foggy", icon: "🌫️" };
+  if (code >= 51 && code <= 67) return { label: "Rainy", icon: "🌧️" };
+  if (code >= 71 && code <= 77) return { label: "Snowy", icon: "❄️" };
+  if (code >= 95) return { label: "Thunderstorm", icon: "⛈️" };
+  return { label: "Cloudy", icon: "☁️" };
+}
+
+// Dynamické odvození výbavy podle teploty
+function getRecommendedGear(tempStr?: string, code?: number): string[] {
+  const gear: string[] = [];
+  const temp = tempStr ? parseFloat(tempStr) : 20;
+
+  if (temp < 10) gear.push("Warm Jacket", "Beanie");
+  else if (temp < 20) gear.push("Light Jacket", "Comfortable Shoes");
+  else gear.push("Sunglasses", "Sunscreen", "Water Bottle");
+
+  if (code && code >= 51) gear.push("Umbrella", "Raincoat");
+
+  return gear;
+}
+
 // --- Dark Mode UI Components ---
 
 function WeatherCard({ data }: { data: WeatherData }) {
@@ -38,6 +64,12 @@ function WeatherCard({ data }: { data: WeatherData }) {
     );
   }
 
+  // Ochrana před prázdnými daty
+  if (!data.city && !data.temperature) return null;
+
+  const conditionInfo = getWeatherCondition(data.conditionCode);
+  const gear = getRecommendedGear(data.temperature, data.conditionCode);
+
   return (
     <div className="p-4 border border-cyan-500/20 rounded-2xl bg-gradient-to-br from-slate-900/90 via-slate-900/60 to-cyan-950/30 shadow-lg text-slate-100 my-2 space-y-3 backdrop-blur-md">
       <div className="flex items-center justify-between border-b border-slate-800 pb-2">
@@ -46,11 +78,17 @@ function WeatherCard({ data }: { data: WeatherData }) {
             Current Weather
           </span>
           <h2 className="text-lg font-bold text-white">
-            {data.city || "Location"}
+            {data.city || "Unknown Location"}
           </h2>
         </div>
-        <div className="text-3xl font-extrabold text-cyan-400 tracking-tight">
-          {data.temperature || "N/A"}
+        <div className="text-right">
+          <div className="text-3xl font-extrabold text-cyan-400 tracking-tight flex items-center gap-1.5 justify-end">
+            <span>{conditionInfo.icon}</span>
+            <span>{data.temperature || "N/A"}</span>
+          </div>
+          <span className="text-xs text-slate-400 font-medium">
+            {conditionInfo.label}
+          </span>
         </div>
       </div>
 
@@ -65,18 +103,18 @@ function WeatherCard({ data }: { data: WeatherData }) {
         </div>
         <div className="p-2.5 bg-slate-950/60 rounded-xl border border-slate-800/80">
           <span className="text-[11px] text-slate-400 block font-medium">
-            Condition Code
+            Weather Condition
           </span>
           <span className="font-semibold text-slate-200">
-            {data.conditionCode ?? "Normal"}
+            {conditionInfo.label}
           </span>
         </div>
       </div>
 
-      {data.recommendedGear && data.recommendedGear.length > 0 && (
+      {gear.length > 0 && (
         <div className="pt-1 text-xs text-cyan-300/80">
           <strong className="text-cyan-400">Recommended Gear:</strong>{" "}
-          {data.recommendedGear.join(", ")}
+          {gear.join(", ")}
         </div>
       )}
     </div>
@@ -127,8 +165,12 @@ function ActivityGrid({ data }: { data: ActivityData | ActivityItem[] }) {
           ))}
         </div>
       ) : (
-        <div className="p-3 border border-slate-800/80 rounded-xl bg-slate-900/40 text-xs text-slate-400 italic">
-          {message || "No matching activities found for this location."}
+        <div className="p-3.5 border border-amber-500/20 rounded-xl bg-amber-950/20 text-xs text-amber-300/90 leading-relaxed">
+          <p className="font-semibold text-amber-200 mb-0.5">
+            ⚠️ Database Notice
+          </p>
+          {message ||
+            "No matching activities found for this location in the live database."}
         </div>
       )}
     </div>
@@ -230,28 +272,29 @@ export default function ChatPage() {
                 // Generative UI / Tool Call Renderers
                 if (part.type.startsWith("tool-")) {
                   const toolPart = part as {
-                    toolCallId: string;
+                    toolCallId?: string;
                     toolName?: string;
                     state?: string;
-                    result?: unknown;
+                    output?: unknown;
+                    input?: unknown;
                   };
 
                   const toolName =
                     toolPart.toolName || part.type.replace("tool-", "");
-                  const state = toolPart.state;
+                  const output = toolPart.output;
+                  const isExecuting =
+                    !output && toolPart.state !== "output-available";
 
-                  const isToolPending = isPending && state !== "result";
-
-                  if (isToolPending) {
+                  if (isExecuting) {
                     return (
                       <div
                         key={toolPart.toolCallId || idx}
-                        className="flex items-center gap-2.5 p-3 border border-amber-500/20 rounded-xl bg-amber-950/20 text-amber-300 text-xs my-2 animate-pulse"
+                        className="flex items-center gap-2.5 p-3 border border-cyan-500/20 rounded-xl bg-cyan-950/20 text-cyan-300 text-xs my-2 animate-pulse"
                       >
-                        <div className="w-2 h-2 rounded-full bg-amber-400 animate-ping" />
+                        <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
                         <span>
                           Executing tool:{" "}
-                          <strong className="font-semibold text-amber-200">
+                          <strong className="font-semibold text-cyan-200">
                             {toolName}
                           </strong>
                           ...
@@ -260,20 +303,26 @@ export default function ChatPage() {
                     );
                   }
 
-                  if (toolName === "getWeather") {
+                  if (
+                    toolName === "getWeather" ||
+                    part.type === "tool-getWeather"
+                  ) {
                     return (
                       <WeatherCard
                         key={toolPart.toolCallId || idx}
-                        data={(toolPart.result || {}) as WeatherData}
+                        data={output}
                       />
                     );
                   }
 
-                  if (toolName === "searchActivities") {
+                  if (
+                    toolName === "searchActivities" ||
+                    part.type === "tool-searchActivities"
+                  ) {
                     return (
                       <ActivityGrid
                         key={toolPart.toolCallId || idx}
-                        data={(toolPart.result || {}) as ActivityData}
+                        data={output as ActivityData}
                       />
                     );
                   }

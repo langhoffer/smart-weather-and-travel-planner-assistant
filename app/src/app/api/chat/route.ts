@@ -9,9 +9,8 @@ const ollama = createOpenAI({
 });
 
 const weatherSchema = z.object({
-  city: z.string().describe("The name of the city"),
-  latitude: z.number().optional().describe("Latitude if available"),
-  longitude: z.number().optional().describe("Longitude if available"),
+  city: z.string().optional().describe("The name of the city"),
+  location: z.string().optional().describe("The name of the city or location"),
 });
 
 const activitiesSchema = z.object({
@@ -39,7 +38,16 @@ export async function POST(req: Request) {
         getWeather: tool({
           description: "Get real-time weather information for a given city.",
           parameters: weatherSchema,
-          execute: async ({ city }) => {
+          execute: async ({ city, location }) => {
+            const targetCity = city || location;
+            if (!targetCity) {
+              return {
+                success: false,
+                error: "No city or location provided",
+                data: null,
+              };
+            }
+
             try {
               const geoRes = await fetch(
                 `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=en&format=json`,
