@@ -14,8 +14,9 @@ const weatherSchema = z.object({
 });
 
 const activitiesSchema = z.object({
-  city: z.string().describe("The name of the city"),
-  type: z.string().describe("Type of activity, e.g. outdoor, indoor"),
+  city: z.string().optional().describe("The name of the city"),
+  location: z.string().optional().describe("The name of the city or location"),
+  type: z.enum(["outdoor", "indoor"]).describe("Type of activities"),
 });
 
 export async function POST(req: Request) {
@@ -94,45 +95,91 @@ export async function POST(req: Request) {
         }),
 
         searchActivities: tool({
-          description: "Search activities in a city by type.",
+          description:
+            "Search real tourist attractions, landmarks, and parks in a city using Wikipedia geo-data.",
           parameters: activitiesSchema,
-          execute: async ({ city, type }) => {
-            try {
-              const response = await fetch(
-                `https://api.example.com/activities?city=${encodeURIComponent(city)}&type=${encodeURIComponent(type)}`,
-                {
-                  headers: {
-                    Authorization: `Bearer ${process.env.TRAVEL_API_KEY ?? ""}`,
-                  },
-                },
-              ).catch(() => null);
+          execute: async ({ city, location, type }) => {
+            const targetCity = city || location;
+            if (!targetCity) {
+              return {
+                success: false,
+                city: "Unknown",
+                type,
+                activities: [],
+                message: "No city or location specified for activity search.",
+              };
+            }
 
-              if (response && response.ok) {
-                const data = await response.json();
+            try {
+              // 1. Get lat/lon for the city using Open-Meteo
+              const geoRes = await fetch(
+                `https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(targetCity)}&count=1&language=en&format=json`,
+              );
+              const geoData = await geoRes.json();
+
+              if (!geoData.results || geoData.results.length === 0) {
                 return {
-                  success: true,
-                  city,
+                  success: false,
+                  city: targetCity,
                   type,
-                  activities: Array.isArray(data) ? data : [],
-                  message: null,
+                  activities: [],
+                  message: `Could not locate coordinates for ${targetCity}.`,
                 };
               }
 
-              // Fallback response contract when endpoint is unresolvable or returns 404/500
+              const { latitude, longitude, name, country } = geoData.results[0];
+
+              // 2. Query Wikimedia/Wikipedia Geosearch API around those coordinates (~10km radius)
+              const wikiUrl = `https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=${latitude}|${longitude}&gsradius=10000&gslimit=8&format=json`;
+
+              const wikiRes = await fetch(wikiUrl, {
+                headers: {
+                  "User-Agent":
+                    "SmartTravelAssistant-InterviewDemo/1.0 (portfolio project)",
+                },
+              });
+
+              if (!wikiRes.ok) {
+                throw new Error("Failed to fetch location data from Wikipedia");
+              }
+
+              const wikiData = await wikiRes.json();
+              const pages = wikiData.query?.geosearch || [];
+
+              // 3. Map articles into clean activity cards
+              const activities = pages.map((page: any) => ({
+                title: page.title,
+                category:
+                  type === "outdoor"
+                    ? "Park & Nature Spot"
+                    : "Cultural Landmark",
+                price: "Public / Sightseeing",
+              }));
+
+              if (activities.length === 0) {
+                return {
+                  success: true,
+                  city: `${name}, ${country}`,
+                  type,
+                  activities: [],
+                  message: `No specific articles found nearby in ${name}.`,
+                };
+              }
+
               return {
-                success: false,
-                city,
+                success: true,
+                city: `${name}, ${country}`,
                 type,
-                activities: [],
-                message: `No active activity database found for ${type} activities in ${city}. Please offer general suggestions based on your knowledge.`,
+                activities,
+                message: null,
               };
             } catch (err) {
               return {
                 success: false,
-                city,
+                city: targetCity,
                 type,
                 activities: [],
-                message: `Error searching for ${type} activities in ${city}: ${(err as Error).message}`,
+                message: `Activity lookup error: ${(err as Error).message}`,
               };
             }
           },
