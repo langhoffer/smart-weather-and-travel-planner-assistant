@@ -346,6 +346,21 @@ export default function ChatPage() {
         )}
       </div>
 
+      {/* Manual Step Continuation / Resume Button */}
+      {!isPending &&
+        messages.length > 0 &&
+        messages[messages.length - 1].role === "assistant" && (
+          <div className="flex justify-center mb-3">
+            <button
+              type="button"
+              onClick={() => sendMessage()}
+              className="px-4 py-1.5 bg-cyan-950/60 hover:bg-cyan-900/80 border border-cyan-500/30 rounded-full text-cyan-300 text-xs font-medium transition-all shadow-sm flex items-center gap-1.5"
+            >
+              <span>✨ Continue generation / Next step</span>
+            </button>
+          </div>
+        )}
+
       {/* Input Form */}
       <div className="sticky bottom-0 p-4 bg-slate-950/80 backdrop-blur-md border-t border-slate-800/80">
         <form onSubmit={onSubmit} className="flex gap-2">
